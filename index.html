@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Head Tilting MBPK - SK 1.1.4</title>
+    
+    <!-- MediaPipe Face Mesh & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <!-- HTML2Canvas untuk muat turun Sijil -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        * { box-sizing: border-box; font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; }
+        
+        :root {
+            --bg-color: #e0f7fa;
+            --border-pattern: "⚡ ⚡ ⚡";
+            --accent-color: #0288d1;
+        }
+
+        body {
+            margin: 0; padding: 10px;
+            background-color: var(--bg-color);
+            min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: background-color 0.5s ease;
+        }
+
+        /* Corak Sisi Tepi Skrin */
+        body::before, body::after {
+            content: var(--border-pattern);
+            position: fixed; top: 0; bottom: 0;
+            width: 50px; font-size: 24px;
+            display: flex; flex-direction: column; justify-content: space-around;
+            align-items: center; opacity: 0.25; z-index: -1; pointer-events: none;
+        }
+        body::before { left: 10px; }
+        body::after { right: 10px; }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px; padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            width: 100%; max-width: 780px; text-align: center;
+            border: 6px solid var(--accent-color);
+            position: relative; margin: 10px 0;
+        }
+
+        h1, h2 { color: #2c3e50; margin-top: 5px; }
+        label { font-weight: bold; font-size: 1.2rem; display: block; margin: 10px 0 5px; text-align: left; }
+        input[type="text"], input[type="date"], select {
+            width: 100%; padding: 12px; border-radius: 12px; border: 3px solid #ccc;
+            font-size: 1.1rem; margin-bottom: 15px; font-weight: bold;
+        }
+
+        /* Selection Avatar Grid */
+        .avatar-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 15px 0;
+        }
+        .avatar-card {
+            border: 4px solid #eee; border-radius: 18px; padding: 10px; cursor: pointer;
+            background: #fff; transition: all 0.2s ease;
+        }
+        .avatar-card:hover, .avatar-card.selected {
+            border-color: var(--accent-color); transform: scale(1.05); background: #f0f9ff;
+        }
+        .avatar-card .icon { font-size: 3rem; display: block; margin: 0 auto; }
+        .avatar-card span { font-weight: bold; display: block; margin-top: 5px; font-size: 1rem; }
+
+        .btn {
+            background-color: #2ecc71; color: white; border: none; padding: 15px 30px;
+            font-size: 1.4rem; font-weight: bold; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 5px 15px rgba(46, 204, 113, 0.4); margin-top: 15px;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: scale(1.05); }
+
+        /* Game Viewport */
+        .progress-bar-container {
+            width: 100%; background: #e0e0e0; border-radius: 20px; height: 25px; overflow: hidden; margin-bottom: 15px;
+        }
+        .progress-bar {
+            height: 100%; background: linear-gradient(90deg, #2ecc71, #27ae60);
+            width: 0%; transition: width 0.3s ease;
+        }
+
+        .game-viewport {
+            position: relative; width: 100%; height: 420px; border-radius: 20px;
+            overflow: hidden; border: 4px solid #333; margin: 10px 0; background: #000;
+        }
+        video { display: none; }
+        canvas { width: 100%; height: 100%; transform: scaleX(-1); }
+
+        .game-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: space-between; padding: 15px; pointer-events: none;
+        }
+
+        .question-box {
+            background: rgba(255,255,255,0.92); border-radius: 15px; padding: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        .question-box h2 { font-size: 1.3rem; margin: 5px 0; color: #2c3e50; }
+        .question-emoji { font-size: 2.8rem; margin: 2px 0; }
+
+        .options-container {
+            display: flex; justify-content: space-between; gap: 15px; width: 100%;
+        }
+        .option-btn {
+            flex: 1; padding: 15px 10px; border-radius: 15px; font-size: 1.1rem;
+            font-weight: bold; color: white; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        .option-left { background: #e67e22; border: 4px solid #d35400; }
+        .option-right { background: #2980b9; border: 4px solid #1f618d; }
+        .option-btn.active { transform: scale(1.08); filter: brightness(1.2); }
+
+        #feedbackText {
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 3rem; font-weight: bold; text-shadow: 3px 3px 8px rgba(0,0,0,0.6);
+            border-radius: 20px; padding: 10px 20px; background: rgba(255, 255, 255, 0.85);
+        }
+
+        /* Certificate */
+        #certificate {
+            background: #fff; border: 10px double #f39c12; padding: 25px; border-radius: 20px;
+            margin: 15px 0; color: #2c3e50;
+        }
+
+        .hidden { display: none !important; }
+
+        .reward-card {
+            background: #fff3cd; border: 3px dashed #ffb800; padding: 15px;
+            border-radius: 15px; margin: 10px; cursor: pointer; font-size: 1.2rem; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SCREEN 1: REGISTER & AVATAR -->
+    <div id="screen-register" class="card">
+        <h1>🎮 Game Head Tilting MBPK</h1>
+        <p style="font-size: 1.1rem; font-weight: bold; color: #555;">Standard Pembelajaran 1.1.4: Kegunaan Benda Hidup & Bukan Hidup</p>
+        
+        <form id="regForm" onsubmit="event.preventDefault(); goToTutorial();">
+            <label for="studentName">Nama Murid:</label>
+            <input type="text" id="studentName" placeholder="Masukkan nama murid" required>
+
+            <div style="display: flex; gap: 15px;">
+                <div style="flex: 1;">
+                    <label for="gameDate">Tarikh:</label>
+                    <input type="date" id="gameDate" required>
+                </div>
+                <div style="flex: 1;">
+                    <label for="gameDay">Hari:</label>
+                    <select id="gameDay" required>
+                        <option value="Isnin">Isnin</option>
+                        <option value="Selasa">Selasa</option>
+                        <option value="Rabu">Rabu</option>
+                        <option value="Khamis">Khamis</option>
+                        <option value="Jumaat">Jumaat</option>
+                    </select>
+                </div>
+            </div>
+
+            <label>Pilih Figura / Avatar Kegemaran (Dengan Filter AR Muka!):</label>
+            <div class="avatar-grid">
+                <div class="avatar-card selected" onclick="selectAvatar('boboiboy', this)">
+                    <span class="icon">⚡</span>
+                    <span>BoBoiBoy</span>
+                </div>
+                <div class="avatar-card" onclick="selectAvatar('ochobot', this)">
+                    <span class="icon">🤖</span>
+                    <span>Ochobot</span>
+                </div>
+                <div class="avatar-card" onclick="selectAvatar('omarhana', this)">
+                    <span class="icon">🌸</span>
+                    <span>Omar & Hana</span>
+                </div>
+                <div class="avatar-card" onclick="selectAvatar('upinipin', this)">
+                    <span class="icon">👧👦</span>
+                    <span>Upin & Ipin</span>
+                </div>
+                <div class="avatar-card" onclick="selectAvatar('ejenali', this)">
+                    <span class="icon">🕵️‍️️</span>
+                    <span>Ejen Ali</span>
+                </div>
+                <div class="avatar-card" onclick="selectAvatar('kancil', this)">
+                    <span class="icon">🦌</span>
+                    <span>Sang Kancil</span>
+                </div>
+            </div>
+
+            <button type="submit" class="btn">Seterusnya ➔</button>
+        </form>
+    </div>
+
+    <!-- SCREEN 2: TUTORIAL -->
+    <div id="screen-tutorial" class="card hidden">
+        <h2>📖 Panduan Permainan</h2>
+        <p style="font-size: 1.3rem; font-weight: bold;">Telengkan kepala anda untuk memilih jawapan!</p>
+        
+        <div style="display: flex; justify-content: space-around; margin: 20px 0;">
+            <div style="background: #ffeaa7; padding: 15px; border-radius: 15px; width: 45%;">
+                <h3 style="margin: 0;">👈 Teleng KIRI</h3>
+                <p>Pilih Jawapan di sebelah Kiri</p>
+            </div>
+            <div style="background: #74b9ff; padding: 15px; border-radius: 15px; width: 45%; color: white;">
+                <h3 style="margin: 0;">Teleng KANAN 👉</h3>
+                <p>Pilih Jawapan di sebelah Kanan</p>
+            </div>
+        </div>
+
+        <p style="font-size: 1.1rem; color: #27ae60; font-weight: bold;">Kamera akan melukis Penapis AR pada muka anda secara automatik! 🕶️⚡</p>
+        <button class="btn" onclick="startGame()">Mula Permainan! 🚀</button>
+    </div>
+
+    <!-- SCREEN 3: GAMEPLAY -->
+    <div id="screen-game" class="card hidden">
+        <div class="progress-bar-container">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.2rem;">
+            <span id="progressText">Soalan 1 daripada 10</span>
+            <span>⭐ Markah: <span id="scoreVal">0</span></span>
+        </div>
+
+        <div class="game-viewport">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+
+            <div class="game-overlay">
+                <div class="question-box">
+                    <div id="qEmoji" class="question-emoji">🌳</div>
+                    <h2 id="qText">Loading soalan...</h2>
+                </div>
+
+                <div id="feedbackText" class="hidden"></div>
+
+                <div class="options-container">
+                    <div id="optLeft" class="option-btn option-left">👈 Jawapan A</div>
+                    <div id="optRight" class="option-btn option-right">Jawapan B 👉</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 4: END & CERTIFICATE & LEADERBOARD -->
+    <div id="screen-end" class="card hidden">
+        <h1>🎉 TAHNIAH & SYABAS! 🎉</h1>
+        
+        <!-- Sijil Digital -->
+        <div id="certificate">
+            <h2>📜 SIJIL PENCAPAIAN DIGITAL</h2>
+            <p style="font-size: 1.1rem; margin: 5px 0;">Dengan ini diperakukan bahawa</p>
+            <h1 id="certName" style="color: #2980b9; margin: 10px 0; font-size: 2.2rem;">NAMA MURID</h1>
+            <p style="font-size: 1.1rem;">Telah berjaya menyempurnakan Permainan Interaktif Head Tilting</p>
+            <p style="font-size: 1.2rem; font-weight: bold;">SK 1.1.4: Kegunaan Benda Hidup & Benda Bukan Hidup</p>
+            
+            <div style="display: flex; justify-content: space-around; margin-top: 20px; font-weight: bold;">
+                <div>Tarikh: <span id="certDate">-</span></div>
+                <div>Hari: <span id="certDay">-</span></div>
+                <div>Markah: <span id="certScore" style="color: #27ae60; font-size: 1.4rem;">0/10</span></div>
+            </div>
+            <div id="certAvatar" style="font-size: 3rem; margin-top: 10px;">⚡</div>
+        </div>
+
+        <button class="btn" style="background-color: #3498db;" onclick="downloadCert()">📥 Muat Turun Sijil</button>
+
+        <!-- Leaderboard -->
+        <h2 style="margin-top: 25px;">🏆 Papan Mata (Ranking)</h2>
+        <div id="leaderboardList" style="text-align: left; background: #f9f9f9; padding: 15px; border-radius: 15px; max-height: 150px; overflow-y: auto;">
+        </div>
+
+        <button class="btn" onclick="goToReward()">Pilih Ganjaran Anda! 🎁</button>
+    </div>
+
+    <!-- SCREEN 5: REWARD PHASE -->
+    <div id="screen-reward" class="card hidden">
+        <h2>🎁 Pilih Ganjaran Istimewa Anda!</h2>
+        
+        <div class="reward-card" onclick="playReward('highfive')">
+            ✋ Give Me Five! (Tapak Tangan Interaktif)
+        </div>
+        <div class="reward-card" onclick="playReward('box')">
+            🎁 Kotak Hadiah Misteri (Kejutan Piala & Bintang)
+        </div>
+        <div class="reward-card" onclick="playReward('extra')">
+            ⏰ Masa Bermain Tambahan (Main Sesi Bebas)
+        </div>
+
+        <div id="rewardDisplay" style="margin-top: 20px; font-size: 3rem; font-weight: bold;"></div>
+        <button class="btn" onclick="location.reload()">Main Semula 🔄</button>
+    </div>
+
+    <script>
+        // Data Theme mengikut Avatar
+        const themes = {
+            boboiboy: { bg: "#e0f7fa", accent: "#0288d1", pattern: '"⚡ ⚡ ⚡"', avatarIcon: '⚡' },
+            ochobot: { bg: "#fffde7", accent: "#fbc02d", pattern: '"⚙️ ⚙️ ⚙️"', avatarIcon: '🤖' },
+            omarhana: { bg: "#f3e5f5", accent: "#ab47bc", pattern: '"🌸 ✨ 🌸"', avatarIcon: '🌸' },
+            upinipin: { bg: "#e8f5e9", accent: "#43a047", pattern: '"🌿 🌿 🌿"', avatarIcon: '👧👦' },
+            ejenali: { bg: "#eceff1", accent: "#d32f2f", pattern: '"🕶️ 🕶️ 🕶️"', avatarIcon: '🕵️‍♂️' },
+            kancil: { bg: "#efebe9", accent: "#6d4c41", pattern: '"🍃 🍃 🍃"', avatarIcon: '🦌' }
+        };
+
+        // 10 Soalan (5 Benda Hidup + 5 Benda Bukan Hidup)
+        const questionsData = [
+            { name: "Pokok", type: "living", emoji: "🌳", text: "Hari cuaca sangat panas. Apakah kegunaan pokok kepada kita?", correct: "Memberi tempat berteduh & oksigen 🍃", wrong: "Digunakan untuk dipandu ke sekolah 🚗" },
+            { name: "Lembu", type: "living", emoji: "🐄", text: "Ibu mahu membuat minuman berkhasiat untuk adik. Apakah kegunaan lembu?", correct: "Membekalkan sumber susu & daging 🥛", wrong: "Tempat untuk kita duduk berehat 🪑" },
+            { name: "Ayam", type: "living", emoji: "🐓", text: "Apakah kegunaan ayam yang dipelihara di reban kampung?", correct: "Membekalkan sumber telur & makanan 🥚", wrong: "Digunakan untuk menyiram pokok 🚿" },
+            { name: "Ikan", type: "living", emoji: "🐟", text: "Apakah kegunaan ikan yang terdapat di dalam kolam atau laut?", correct: "Sumber makanan berprotein untuk manusia 🐟", wrong: "Untuk membina dinding rumah 🧱" },
+            { name: "Lebah", type: "living", emoji: "🐝", text: "Lebah terbang di sekitar bunga. Apakah kegunaan lebah kepada manusia?", correct: "Menghasilkan madu yang manis & sihat 🍯", wrong: "Membawa barang berat ke pasar 🛒" },
+            { name: "Kereta", type: "non-living", emoji: "🚗", text: "Ayah mahu membawa keluarga ke bandar. Apakah kegunaan kereta?", correct: "Kenderaan untuk bergerak ke lokasi 🛣️", wrong: "Membekalkan oksigen bernafas 🍃" },
+            { name: "Kerusi", type: "non-living", emoji: "🪑", text: "Murid rasa letih selepas bersenam. Apakah kegunaan kerusi?", correct: "Tempat untuk duduk & berehat 🧘", wrong: "Membekalkan sumber makanan 🍖" },
+            { name: "Rumah", type: "non-living", emoji: "🏠", text: "Hujan turun dengan sangat lebat. Apakah kegunaan rumah?", correct: "Tempat tinggal & berlindung daripada hujan 🌧️", wrong: "Untuk dinaiki ke tempat kerja 🚲" },
+            { name: "Pensel", type: "non-living", emoji: "✏️", text: "Apakah kegunaan pensel di dalam kelas Sains?", correct: "Untuk menulis & melukis gambar 📝", wrong: "Untuk dijadikan makanan tengah hari 🍱" },
+            { name: "Pili Air", type: "non-living", emoji: "🚰", text: "Tangan murid kotor selepas berkebun. Apakah kegunaan paip air?", correct: "Membekalkan air untuk membasuh & membersih 🧼", wrong: "Untuk tempat berteduh dari panas 🌳" }
+        ];
+
+        let selectedAvatar = 'boboiboy';
+        let studentData = {};
+        let currentQ = 0;
+        let score = 0;
+        let canAnswer = true;
+        let questions = [];
+
+        document.getElementById('gameDate').valueAsDate = new Date();
+
+        function selectAvatar(avatar, el) {
+            selectedAvatar = avatar;
+            document.querySelectorAll('.avatar-card').forEach(c => c.classList.remove('selected'));
+            el.classList.add('selected');
+            
+            const t = themes[avatar];
+            document.documentElement.style.setProperty('--bg-color', t.bg);
+            document.documentElement.style.setProperty('--accent-color', t.accent);
+            document.documentElement.style.setProperty('--border-pattern', t.pattern);
+        }
+
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const msg = new SpeechSynthesisUtterance(text);
+                msg.lang = 'ms-MY';
+                window.speechSynthesis.speak(msg);
+            }
+        }
+
+        function goToTutorial() {
+            studentData = {
+                name: document.getElementById('studentName').value,
+                date: document.getElementById('gameDate').value,
+                day: document.getElementById('gameDay').value,
+                avatar: selectedAvatar
+            };
+            document.getElementById('screen-register').classList.add('hidden');
+            document.getElementById('screen-tutorial').classList.remove('hidden');
+            speakText("Selamat datang " + studentData.name + ". Sila baca panduan permainan.");
+        }
+
+        function startGame() {
+            document.getElementById('screen-tutorial').classList.add('hidden');
+            document.getElementById('screen-game').classList.remove('hidden');
+
+            questions = questionsData.map(q => {
+                const isCorrectLeft = Math.random() < 0.5;
+                return {
+                    ...q,
+                    leftText: isCorrectLeft ? q.correct : q.wrong,
+                    rightText: isCorrectLeft ? q.wrong : q.correct,
+                    correctSide: isCorrectLeft ? 'left' : 'right'
+                };
+            });
+
+            initCamera();
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if (currentQ >= questions.length) {
+                endGame();
+                return;
+            }
+
+            const q = questions[currentQ];
+            document.getElementById('qEmoji').innerText = q.emoji;
+            document.getElementById('qText').innerText = q.text;
+            document.getElementById('optLeft').innerText = "👈 " + q.leftText;
+            document.getElementById('optRight').innerText = q.rightText + " 👉";
+            
+            document.getElementById('progressText').innerText = `Soalan ${currentQ + 1} daripada 10`;
+            document.getElementById('progressBar').style.width = `${((currentQ + 1) / 10) * 100}%`;
+            
+            const feedbackEl = document.getElementById('feedbackText');
+            feedbackEl.classList.add('hidden');
+
+            speakText(q.text);
+            canAnswer = true;
+        }
+
+        function handleAnswer(chosenSide) {
+            if (!canAnswer) return;
+            canAnswer = false;
+
+            const q = questions[currentQ];
+            const feedbackEl = document.getElementById('feedbackText');
+            feedbackEl.classList.remove('hidden');
+
+            if (chosenSide === q.correctSide) {
+                score++;
+                document.getElementById('scoreVal').innerText = score;
+                feedbackEl.innerText = "🎉 BETUL!";
+                feedbackEl.style.color = "#2ecc71";
+                speakText(`Syabas ${studentData.name}! Jawapan anda betul.`);
+            } else {
+                feedbackEl.innerText = "❌ SALAH!";
+                feedbackEl.style.color = "#e74c3c";
+                speakText(`Kurang tepat ${studentData.name}. Cuba lagi soalan seterusnya.`);
+            }
+
+            setTimeout(() => {
+                currentQ++;
+                loadQuestion();
+            }, 2500);
+        }
+
+        /* Setup Camera & MediaPipe Face Mesh & AR Filters */
+        function initCamera() {
+            const videoElement = document.getElementById('webcam');
+            const canvasElement = document.getElementById('output_canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+
+            const faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            faceMesh.onResults((results) => {
+                canvasElement.width = videoElement.videoWidth || 640;
+                canvasElement.height = videoElement.videoHeight || 480;
+
+                canvasCtx.save();
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+                if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                    const landmarks = results.multiFaceLandmarks[0];
+                    
+                    // Landmark penting muka (skala nisbah 0 - 1)
+                    const leftEye = landmarks[33];
+                    const rightEye = landmarks[263];
+                    const forehead = landmarks[10];
+
+                    // Penjelasan Sudut Sengetan Kepala
+                    const dY = rightEye.y - leftEye.y;
+                    const dX = rightEye.x - leftEye.x;
+                    const angle = Math.atan2(dY, dX) * (180 / Math.PI);
+
+                    const optLeft = document.getElementById("optLeft");
+                    const optRight = document.getElementById("optRight");
+
+                    if (angle > 12) { // Tilt Left
+                        optLeft.classList.add("active");
+                        optRight.classList.remove("active");
+                        handleAnswer("left");
+                    } else if (angle < -12) { // Tilt Right
+                        optRight.classList.add("active");
+                        optLeft.classList.remove("active");
+                        handleAnswer("right");
+                    } else {
+                        optLeft.classList.remove("active");
+                        optRight.classList.remove("active");
+                    }
+
+                    // Lukis Filter AR di atas muka mengikut avatar pilihan
+                    drawARFilter(canvasCtx, landmarks, canvasElement.width, canvasElement.height);
+                }
+                canvasCtx.restore();
+            });
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => { await faceMesh.send({ image: videoElement }); },
+                width: 640, height: 480
+            });
+            camera.start();
+        }
+
+        // FUNGSI LUKISAN FILTER AR (AUGMENTED REALITY)
+        function drawARFilter(ctx, landmarks, w, h) {
+            const leftEye = { x: landmarks[33].x * w, y: landmarks[33].y * h };
+            const rightEye = { x: landmarks[263].x * w, y: landmarks[263].y * h };
+            const forehead = { x: landmarks[10].x * w, y: landmarks[10].y * h };
+
+            const eyeDistance = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y);
+
+            ctx.save();
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            if (selectedAvatar === 'ejenali') {
+                // Filter: Cermin Mata IRIS HUD Digital
+                const midX = (leftEye.x + rightEye.x) / 2;
+                const midY = (leftEye.y + rightEye.y) / 2;
+                
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "#00e5ff";
+                ctx.beginPath();
+                ctx.arc(leftEye.x, leftEye.y, eyeDistance * 0.35, 0, 2 * Math.PI);
+                ctx.arc(rightEye.x, rightEye.y, eyeDistance * 0.35, 0, 2 * Math.PI);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(leftEye.x, leftEye.y);
+                ctx.lineTo(rightEye.x, rightEye.y);
+                ctx.stroke();
+
+                ctx.font = `${eyeDistance * 0.5}px sans-serif`;
+                ctx.fillText("🕶️", midX, midY);
+
+            } else if (selectedAvatar === 'boboiboy') {
+                // Filter: Topi / Petir
+                ctx.font = `${eyeDistance * 0.8}px sans-serif`;
+                ctx.fillText("⚡", forehead.x, forehead.y - (eyeDistance * 0.4));
+
+            } else if (selectedAvatar === 'ochobot') {
+                // Filter: Gear Robot
+                ctx.font = `${eyeDistance * 0.7}px sans-serif`;
+                ctx.fillText("⚙️", forehead.x, forehead.y - (eyeDistance * 0.3));
+
+            } else if (selectedAvatar === 'omarhana') {
+                // Filter: Mahkota Bunga
+                ctx.font = `${eyeDistance * 0.8}px sans-serif`;
+                ctx.fillText("🌸", forehead.x, forehead.y - (eyeDistance * 0.4));
+
+            } else if (selectedAvatar === 'upinipin') {
+                // Filter: Rambut / Bintang Upin
+                ctx.font = `${eyeDistance * 0.7}px sans-serif`;
+                ctx.fillText("✨", forehead.x, forehead.y - (eyeDistance * 0.4));
+
+            } else if (selectedAvatar === 'kancil') {
+                // Filter: Mahkota Daun
+                ctx.font = `${eyeDistance * 0.8}px sans-serif`;
+                ctx.fillText("🍃", forehead.x, forehead.y - (eyeDistance * 0.4));
+            }
+
+            ctx.restore();
+        }
+
+        function endGame() {
+            document.getElementById('screen-game').classList.add('hidden');
+            document.getElementById('screen-end').classList.remove('hidden');
+
+            document.getElementById('certName').innerText = studentData.name;
+            document.getElementById('certDate').innerText = studentData.date;
+            document.getElementById('certDay').innerText = studentData.day;
+            document.getElementById('certScore').innerText = `${score}/10`;
+            document.getElementById('certAvatar').innerText = themes[studentData.avatar].avatarIcon;
+
+            let leaderboard = JSON.parse(localStorage.getItem('htg_leaderboard') || '[]');
+            leaderboard.push({ name: studentData.name, score: score, date: studentData.date });
+            leaderboard.sort((a, b) => b.score - a.score);
+            localStorage.setItem('htg_leaderboard', JSON.stringify(leaderboard));
+
+            const listEl = document.getElementById('leaderboardList');
+            listEl.innerHTML = leaderboard.slice(0, 5).map((item, idx) => 
+                `<p style="margin: 5px 0; font-weight: bold;">#${idx+1} ${item.name} - ${item.score}/10 Markah (${item.date})</p>`
+            ).join('');
+
+            speakText(`Tahniah ${studentData.name}! Anda mendapat ${score} daripada 10 markah.`);
+        }
+
+        function downloadCert() {
+            html2canvas(document.getElementById('certificate')).then(canvas => {
+                const link = document.createElement('a');
+                link.download = `Sijil_${studentData.name}.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            });
+        }
+
+        function goToReward() {
+            document.getElementById('screen-end').classList.add('hidden');
+            document.getElementById('screen-reward').classList.remove('hidden');
+        }
+
+        function playReward(type) {
+            const display = document.getElementById('rewardDisplay');
+            if (type === 'highfive') {
+                display.innerText = "✋ HIGH FIVE! SYABAS!";
+                speakText("High five! Anda memang hebat!");
+            } else if (type === 'box') {
+                display.innerText = "🎁 🏆 🌟 KOTAK HADIAH TERBUKA!";
+                speakText("Wah, anda mendapat piala dan bintang kegemilangan!");
+            } else if (type === 'extra') {
+                display.innerText = "⏰ MASA BERMAIN TAMBAHAN!";
+                speakText("Masa bermain tambahan diberikan. Nikmati permainan anda!");
+            }
+        }
+    </script>
+</body>
+</html>
